@@ -66,7 +66,7 @@ async function generateLabelPNG(box) {
     ctx.strokeRect(ctx.lineWidth/2, ctx.lineWidth/2, W-ctx.lineWidth, H-ctx.lineWidth);
   }
   const qrSize = 110, qrMargin = (H-qrSize)/2;
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${qrSize}x${qrSize}&data=${encodeURIComponent(`${box.number} | ${box.zone} | P${box.priority}`)}&bgcolor=${isP1?"000000":"ffffff"}&color=${isP1?"ffffff":"000000"}&margin=1`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${qrSize}x${qrSize}&data=${encodeURIComponent("https://imaljac.github.io/MUDANZA/?caja=" + box.number)}&bgcolor=${isP1?"000000":"ffffff"}&color=${isP1?"ffffff":"000000"}&margin=1`;
   await new Promise((resolve) => {
     const img = new Image(); img.crossOrigin = "anonymous";
     img.onload = () => { ctx.drawImage(img, qrMargin, qrMargin, qrSize, qrSize); resolve(); };
@@ -107,7 +107,8 @@ const PRIORITY = {1:{label:"Urgente"},2:{label:"Normal"},3:{label:"Puede esperar
 const STATUS_OPTIONS = ["Vacía","En proceso","Cerrada","Entregada"];
 const ZONES = ["Escritorio","Librero","Cocina","Baño","Lavadero","Dormitorio","Living","Depósito","Otro"];
 const DETAIL_LEVELS = {1:"Ítem por ítem",2:"Por grupos",3:"General"};
-const QR_URL = (t) => `https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(t)}&bgcolor=ffffff&color=000000&margin=2`;
+const BASE_URL = "https://imaljac.github.io/MUDANZA";
+const QR_URL = (number) => `https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(BASE_URL + "/?caja=" + number)}&bgcolor=ffffff&color=000000&margin=2`;
 
 function LabelPreview({box}) {
   const isP1 = box.priority===1;
@@ -115,7 +116,7 @@ function LabelPreview({box}) {
     <div style={{display:"flex",alignItems:"center",gap:8,borderRadius:6,padding:"4px 8px",width:120,height:44,fontFamily:"monospace",flexShrink:0,
       background:isP1?"#0d0d0d":"#fff",color:isP1?"#fff":box.priority===2?"#0d0d0d":"#9ca3af",
       border:isP1?"none":box.priority===2?"2px solid #0d0d0d":"1px solid #d1d5db"}}>
-      <img src={QR_URL(`${box.number} | ${box.zone} | P${box.priority}`)} alt="qr" width={32} height={32} style={{filter:isP1?"invert(1)":"none",flexShrink:0}} />
+      <img src={QR_URL(box.number)} alt="qr" width={32} height={32} style={{filter:isP1?"invert(1)":"none",flexShrink:0}} />
       <div style={{display:"flex",flexDirection:"column",lineHeight:1.2,overflow:"hidden"}}>
         <span style={{fontSize:13,fontWeight:900,lineHeight:1}}>{box.number}</span>
         <span style={{fontSize:8,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{box.zone}</span>
@@ -220,6 +221,13 @@ function App() {
   const [form,setForm] = useState({number:"",zone:"Escritorio",priority:1,status:"Vacía",detail:1,notes:"",photo:null,items:[]});
   const importRef = useRef(null);
 
+  // Detect ?caja= param on load
+  useEffect(()=>{
+    const params = new URLSearchParams(window.location.search);
+    const cajaParam = params.get("caja");
+    if (cajaParam) { window.__cajaParam = cajaParam; }
+  },[]);
+
   useEffect(()=>{
     function init() {
       const {auth,onAuthStateChanged,db,collection,onSnapshot} = window.__firebase;
@@ -230,6 +238,10 @@ function App() {
             const data = snap.docs.map(d=>({...d.data(),id:d.id}));
             data.sort((a,b)=>(a.number||"").localeCompare(b.number||""));
             setBoxes(data);
+            if (window.__cajaParam) {
+              const found = data.find(b=>b.number===window.__cajaParam);
+              if (found) { setSelectedBox(found); window.__cajaParam = null; }
+            }
           });
           return unsub;
         }
@@ -478,7 +490,7 @@ function App() {
               {selectedBox?.id===box.id&&(
                 <div style={{borderTop:"1px solid #f3f4f6",padding:12,background:"#f9fafb",display:"flex",flexDirection:"column",gap:16}}>
                   <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
-                    <img src={QR_URL(`${box.number} | ${box.zone} | P${box.priority}`)} alt="QR" width={72} height={72}
+                    <img src={QR_URL(box.number)} alt="QR" width={72} height={72}
                       style={{borderRadius:8,border:"1px solid #e5e7eb",background:"#fff",padding:4,flexShrink:0}} />
                     <div style={{display:"flex",flexDirection:"column",gap:4}}>
                       <p style={{fontSize:11,color:"#9ca3af"}}>Nivel de detalle</p>
