@@ -20,16 +20,21 @@
     input, select, textarea, button { font-family: inherit; }
     button { border: none; background: none; cursor: pointer; }
     button:focus, input:focus, select:focus, textarea:focus { outline: none; }
+    .tab-bar { position: fixed; bottom: 0; left: 0; right: 0; background: #fff; border-top: 1px solid #f3f4f6; display: flex; z-index: 20; padding-bottom: env(safe-area-inset-bottom); }
+    .tab-btn { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 10px 4px 8px; gap: 3px; cursor: pointer; border: none; background: none; }
+    .tab-btn span:first-child { font-size: 20px; }
+    .tab-btn span:last-child { font-size: 10px; font-weight: 500; }
+    .page { padding-bottom: 80px; }
   </style>
 </head>
 <body>
 <div id="root"></div>
 
-<script type="module">
-  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-app.js";
-  import { getFirestore, collection, onSnapshot, doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
-  import { getAuth, signInWithPopup, signOut, GoogleAuthProvider, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-auth.js";
-
+<!-- Firebase compat (no ES modules, funciona en todos los navegadores) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script>
   const firebaseConfig = {
     apiKey: "AIzaSyAfujPBgA0ESCUCWmtOrBrn_sXNv1evdI4",
     authDomain: "mudanza-db608.firebaseapp.com",
@@ -39,79 +44,115 @@
     appId: "1:408600020912:web:5e8604c6e942b6becc7875"
   };
 
-  const app = initializeApp(firebaseConfig);
-  const db = getFirestore(app);
-  const auth = getAuth(app);
-  const provider = new GoogleAuthProvider();
+  firebase.initializeApp(firebaseConfig);
+  const _db = firebase.firestore();
+  const _auth = firebase.auth();
+  const _provider = new firebase.auth.GoogleAuthProvider();
 
-  window.__firebase = { db, auth, provider, collection, onSnapshot, doc, setDoc, deleteDoc, signInWithPopup, signOut, onAuthStateChanged };
+  window.__firebase = {
+    db: _db,
+    auth: _auth,
+    provider: _provider,
+    collection: (db, name) => db.collection(name),
+    onSnapshot: (ref, cb) => ref.onSnapshot(cb),
+    doc: (db, col, id) => db.collection(col).doc(id),
+    setDoc: (ref, data) => ref.set(data),
+    deleteDoc: (ref) => ref.delete(),
+    signInWithPopup: (auth, provider) => auth.signInWithPopup(provider),
+    signOut: (auth) => auth.signOut(),
+    onAuthStateChanged: (auth, cb) => auth.onAuthStateChanged(cb),
+  };
   window.dispatchEvent(new Event("firebase-ready"));
 </script>
 
-<script type="text/babel" data-type="module">
+<script type="text/babel">
 const { useState, useMemo, useRef, useEffect } = React;
 
+// ─── Label PNG ─────────────────────────────────────────────────────────────
 async function generateLabelPNG(box) {
-  const W = 472, H = 142;
-  const isP1 = box.priority === 1;
-  const isP2 = box.priority === 2;
-  const canvas = document.createElement("canvas");
-  canvas.width = W; canvas.height = H;
-  const ctx = canvas.getContext("2d");
-  ctx.fillStyle = isP1 ? "#000000" : "#ffffff";
-  ctx.fillRect(0, 0, W, H);
-  if (!isP1) {
-    ctx.strokeStyle = isP2 ? "#000000" : "#aaaaaa";
-    ctx.lineWidth = isP2 ? 7 : 2;
-    ctx.strokeRect(ctx.lineWidth/2, ctx.lineWidth/2, W-ctx.lineWidth, H-ctx.lineWidth);
-  }
-  const qrSize = 110, qrMargin = (H-qrSize)/2;
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=${qrSize}x${qrSize}&data=${encodeURIComponent("https://imaljac.github.io/MUDANZA/?caja=" + box.number)}&bgcolor=${isP1?"000000":"ffffff"}&color=${isP1?"ffffff":"000000"}&margin=1`;
-  await new Promise((resolve) => {
-    const img = new Image(); img.crossOrigin = "anonymous";
-    img.onload = () => { ctx.drawImage(img, qrMargin, qrMargin, qrSize, qrSize); resolve(); };
-    img.onerror = resolve; img.src = qrUrl;
-  });
-  const textX = qrMargin + qrSize + 14;
-  const itemCount = (box.items||[]).length;
-  const off = document.createElement("canvas");
-  off.width = W; off.height = H;
-  const octx = off.getContext("2d");
-  octx.fillStyle = isP1 ? "#ffffff" : "#000000";
-  octx.font = "bold 160px monospace";
-  octx.textAlign = "right";
-  octx.fillText(box.number, W-4, H+10);
-  const imgData = octx.getImageData(0, 0, W, H);
-  ctx.save();
-  ctx.fillStyle = isP1 ? "#ffffff" : "#000000";
-  for (let y=0; y<H; y+=4) for (let x=0; x<W; x+=4) {
-    const idx=(y*W+x)*4;
-    if (imgData.data[idx+3]>128 && imgData.data[idx]>128) {
-      ctx.beginPath(); ctx.arc(x,y,1,0,Math.PI*2); ctx.fill();
-    }
-  }
-  ctx.restore();
-  ctx.textAlign = "left";
-  ctx.fillStyle = isP1 ? "#ffffff" : "#000000";
-  ctx.font = "bold 50px monospace";
-  ctx.fillText(`#${box.number}`, textX, 54);
-  ctx.font = "bold 22px sans-serif";
-  ctx.fillText(box.zone, textX, 82);
-  ctx.font = "17px sans-serif";
-  ctx.fillStyle = isP1 ? "#aaaaaa" : "#888888";
-  ctx.fillText(itemCount>0 ? `P${box.priority}  ·  ${itemCount} ítem${itemCount!==1?"s":""}` : `P${box.priority}`, textX, 112);
+  const W=472, H=142, isP1=box.priority===1, isP2=box.priority===2;
+  const canvas=document.createElement("canvas"); canvas.width=W; canvas.height=H;
+  const ctx=canvas.getContext("2d");
+  ctx.fillStyle=isP1?"#000000":"#ffffff"; ctx.fillRect(0,0,W,H);
+  if(!isP1){ctx.strokeStyle=isP2?"#000000":"#aaaaaa";ctx.lineWidth=isP2?7:2;ctx.strokeRect(ctx.lineWidth/2,ctx.lineWidth/2,W-ctx.lineWidth,H-ctx.lineWidth);}
+  const qrSize=110,qrMargin=(H-qrSize)/2;
+  const qrUrl=`https://api.qrserver.com/v1/create-qr-code/?size=${qrSize}x${qrSize}&data=${encodeURIComponent("https://imaljac.github.io/MUDANZA/?caja="+box.number)}&bgcolor=${isP1?"000000":"ffffff"}&color=${isP1?"ffffff":"000000"}&margin=1`;
+  await new Promise(resolve=>{const img=new Image();img.crossOrigin="anonymous";img.onload=()=>{ctx.drawImage(img,qrMargin,qrMargin,qrSize,qrSize);resolve();};img.onerror=resolve;img.src=qrUrl;});
+  const textX=qrMargin+qrSize+14,itemCount=(box.items||[]).length;
+  const off=document.createElement("canvas");off.width=W;off.height=H;
+  const octx=off.getContext("2d");octx.fillStyle=isP1?"#ffffff":"#000000";octx.font="bold 160px monospace";octx.textAlign="right";octx.fillText(box.number,W-4,H+10);
+  const imgData=octx.getImageData(0,0,W,H);ctx.save();ctx.fillStyle=isP1?"#ffffff":"#000000";
+  for(let y=0;y<H;y+=4)for(let x=0;x<W;x+=4){const idx=(y*W+x)*4;if(imgData.data[idx+3]>128&&imgData.data[idx]>128){ctx.beginPath();ctx.arc(x,y,1,0,Math.PI*2);ctx.fill();}}
+  ctx.restore();ctx.textAlign="left";ctx.fillStyle=isP1?"#ffffff":"#000000";
+  ctx.font="bold 50px monospace";ctx.fillText(`#${box.number}`,textX,54);
+  ctx.font="bold 22px sans-serif";ctx.fillText(box.zone,textX,82);
+  ctx.font="17px sans-serif";ctx.fillStyle=isP1?"#aaaaaa":"#888888";
+  ctx.fillText(itemCount>0?`P${box.priority}  ·  ${itemCount} ítem${itemCount!==1?"s":""}`:`P${box.priority}`,textX,112);
   return canvas.toDataURL("image/png");
 }
 
-const PRIORITY = {1:{label:"Urgente"},2:{label:"Normal"},3:{label:"Puede esperar"}};
-const STATUS_OPTIONS = ["Vacía","En proceso","Cerrada","Entregada"];
-const ZONES = ["Escritorio","Librero","Cocina","Baño","Lavadero","Dormitorio","Living","Depósito","Otro"];
-const DETAIL_LEVELS = {1:"Ítem por ítem",2:"Por grupos",3:"General"};
-const BASE_URL = "https://imaljac.github.io/MUDANZA";
-const QR_URL = (number) => `https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(BASE_URL + "/?caja=" + number)}&bgcolor=ffffff&color=000000&margin=2`;
+// ─── Constants ─────────────────────────────────────────────────────────────
+const PRIORITY={1:{label:"Urgente"},2:{label:"Normal"},3:{label:"Puede esperar"}};
+const STATUS_OPTIONS=["Vacía","En proceso","Cerrada","Entregada"];
+const DEFAULT_ZONES=["Escritorio","Librero","Cocina","Baño","Lavadero","Dormitorio","Living","Depósito","Otro"];
+const DETAIL_LEVELS={1:"Ítem por ítem",2:"Por grupos",3:"General"};
+const BASE_URL="https://imaljac.github.io/MUDANZA";
+const QR_URL=(number)=>`https://api.qrserver.com/v1/create-qr-code/?size=80x80&data=${encodeURIComponent(BASE_URL+"/?caja="+number)}&bgcolor=ffffff&color=000000&margin=2`;
+
+const INITIAL_OBJETOS = [
+  {id:"obj-1",name:"Mesa de comedor",w:135,d:97,h:85,units:1,zone:"Living",photo:null,notes:""},
+  {id:"obj-2",name:"Sillas",w:45,d:50,h:90,units:6,zone:"Living",photo:null,notes:""},
+  {id:"obj-3",name:"Mesa ratona",w:100,d:60,h:42,units:1,zone:"Living",photo:null,notes:""},
+  {id:"obj-4",name:"Escritorio",w:160,d:82,h:75,units:1,zone:"Escritorio",photo:null,notes:""},
+  {id:"obj-5",name:"Heladera",w:62,d:65,h:160,units:1,zone:"Cocina",photo:null,notes:""},
+  {id:"obj-6",name:"Lavarropas",w:55,d:55,h:90,units:1,zone:"Lavadero",photo:null,notes:""},
+];
+
+// ─── Shared components ──────────────────────────────────────────────────────
+function PhotoField({photo, onAdd, onRemove}) {
+  return photo ? (
+    <div style={{position:"relative"}}>
+      <img src={photo} alt="foto" style={{width:"100%",borderRadius:10,objectFit:"cover",border:"1px solid #f3f4f6",maxHeight:200}} />
+      <button onClick={onRemove} style={{position:"absolute",top:8,right:8,background:"rgba(0,0,0,0.6)",color:"#fff",borderRadius:"50%",width:24,height:24,fontSize:11,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
+    </div>
+  ) : (
+    <label style={{display:"flex",alignItems:"center",gap:8,border:"1px dashed #e5e7eb",borderRadius:10,padding:12,cursor:"pointer"}}>
+      <span style={{fontSize:18}}>📷</span>
+      <div><p style={{fontSize:13,fontWeight:500,color:"#0d0d0d"}}>Agregar foto</p><p style={{fontSize:11,color:"#9ca3af"}}>Cámara o galería</p></div>
+      <input type="file" accept="image/*" capture="environment" style={{display:"none"}}
+        onChange={e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=ev=>onAdd(ev.target.result);r.readAsDataURL(f);}} />
+    </label>
+  );
+}
+
+function ZoneSelect({value, onChange, zones, onAddZone}) {
+  const [adding,setAdding]=useState(false);
+  const [newZone,setNewZone]=useState("");
+  function add(){const v=newZone.trim();if(!v)return;onAddZone(v);onChange(v);setNewZone("");setAdding(false);}
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:6}}>
+      {!adding ? (
+        <div style={{display:"flex",gap:8}}>
+          <select style={{flex:1,border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontSize:13,background:"#fff"}}
+            value={value} onChange={e=>onChange(e.target.value)}>
+            {zones.map(z=><option key={z}>{z}</option>)}
+          </select>
+          <button onClick={()=>setAdding(true)} style={{border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontSize:12,color:"#6b7280"}}>+ Nueva</button>
+        </div>
+      ) : (
+        <div style={{display:"flex",gap:8}}>
+          <input autoFocus style={{flex:1,border:"1px solid #0d0d0d",borderRadius:10,padding:"8px 12px",fontSize:13}}
+            placeholder="Nombre del espacio..." value={newZone} onChange={e=>setNewZone(e.target.value)} onKeyDown={e=>e.key==="Enter"&&add()} />
+          <button onClick={add} style={{background:"#0d0d0d",color:"#fff",borderRadius:10,padding:"8px 14px",fontSize:13,fontWeight:700}}>+</button>
+          <button onClick={()=>setAdding(false)} style={{border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontSize:12,color:"#9ca3af"}}>✕</button>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function LabelPreview({box}) {
-  const isP1 = box.priority===1;
+  const isP1=box.priority===1;
   return (
     <div style={{display:"flex",alignItems:"center",gap:8,borderRadius:6,padding:"4px 8px",width:120,height:44,fontFamily:"monospace",flexShrink:0,
       background:isP1?"#0d0d0d":"#fff",color:isP1?"#fff":box.priority===2?"#0d0d0d":"#9ca3af",
@@ -157,9 +198,9 @@ function HierarchyLegend() {
 }
 
 function ItemList({items,onAdd,onRemove}) {
-  const [input,setInput] = useState("");
-  const inputRef = useRef(null);
-  function add() { const v=input.trim(); if(!v) return; onAdd(v); setInput(""); inputRef.current?.focus(); }
+  const [input,setInput]=useState("");
+  const inputRef=useRef(null);
+  function add(){const v=input.trim();if(!v)return;onAdd(v);setInput("");inputRef.current?.focus();}
   return (
     <div style={{display:"flex",flexDirection:"column",gap:8}}>
       <div style={{display:"flex",gap:8}}>
@@ -167,233 +208,140 @@ function ItemList({items,onAdd,onRemove}) {
           placeholder="Agregar ítem..." value={input} onChange={e=>setInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&add()} />
         <button onClick={add} style={{background:"#0d0d0d",color:"#fff",padding:"8px 14px",borderRadius:10,fontWeight:700,fontSize:13}}>+</button>
       </div>
-      {items.length===0
-        ? <p style={{fontSize:11,color:"#d1d5db",textAlign:"center",padding:"8px 0"}}>Sin ítems cargados</p>
-        : <ul style={{display:"flex",flexDirection:"column",gap:4,listStyle:"none"}}>
-            {items.map((item,i)=>(
-              <li key={i} style={{display:"flex",alignItems:"center",gap:8}}>
-                <span style={{width:4,height:4,borderRadius:"50%",background:"#d1d5db",flexShrink:0}}/>
-                <span style={{flex:1,fontSize:13,color:"#0d0d0d"}}>{item}</span>
-                <button onClick={()=>onRemove(i)} style={{fontSize:11,color:"#d1d5db",padding:"0 4px"}}>✕</button>
-              </li>
-            ))}
-          </ul>
+      {items.length===0?<p style={{fontSize:11,color:"#d1d5db",textAlign:"center",padding:"8px 0"}}>Sin ítems cargados</p>
+        :<ul style={{display:"flex",flexDirection:"column",gap:4,listStyle:"none"}}>
+          {items.map((item,i)=>(
+            <li key={i} style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{width:4,height:4,borderRadius:"50%",background:"#d1d5db",flexShrink:0}}/>
+              <span style={{flex:1,fontSize:13,color:"#0d0d0d"}}>{item}</span>
+              <button onClick={()=>onRemove(i)} style={{fontSize:11,color:"#d1d5db",padding:"0 4px"}}>✕</button>
+            </li>
+          ))}
+        </ul>
       }
     </div>
   );
 }
 
-function LoginScreen({onLogin}) {
-  const [loading,setLoading] = useState(false);
-  async function login() {
-    setLoading(true);
-    try {
-      const {auth,provider,signInWithPopup} = window.__firebase;
-      await signInWithPopup(auth, provider);
-    } catch(e) { console.error(e); setLoading(false); }
-  }
-  return (
-    <div style={{minHeight:"100vh",background:"#fff",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:24,padding:24}}>
-      <div style={{textAlign:"center"}}>
-        <h1 style={{fontSize:32,fontWeight:900,fontFamily:"Space Grotesk,sans-serif",color:"#0d0d0d",letterSpacing:"-0.02em"}}>MUDANZA</h1>
-        <p style={{fontSize:13,color:"#9ca3af",marginTop:6}}>Gestión de cajas · privado y seguro</p>
-      </div>
-      <button onClick={login} disabled={loading} style={{display:"flex",alignItems:"center",gap:12,border:"1px solid #e5e7eb",borderRadius:14,padding:"14px 24px",fontSize:14,fontWeight:600,color:"#0d0d0d",background:"#fff",cursor:"pointer"}}>
-        <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.2l6.8-6.8C35.7 2.2 30.2 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.9 6.1C12.4 13 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4 6.9-10 6.9-17z"/><path fill="#FBBC05" d="M10.5 28.6A14.8 14.8 0 0 1 9.5 24c0-1.6.3-3.1.7-4.6l-7.9-6.1A23.9 23.9 0 0 0 0 24c0 3.9.9 7.5 2.6 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.2-5.5l-7.5-5.8c-2 1.4-4.6 2.2-7.7 2.2-6.2 0-11.5-4.2-13.4-9.8l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>
-        {loading ? "Ingresando…" : "Ingresar con Google"}
-      </button>
-      <p style={{fontSize:11,color:"#d1d5db",textAlign:"center",maxWidth:260}}>Solo vos podés ver y editar tus datos. Nadie más tiene acceso.</p>
-    </div>
-  );
-}
+// ─── Tab: Cajas ─────────────────────────────────────────────────────────────
+function TabCajas({boxes,setBoxes,zones,onAddZone,syncing,setSyncing}) {
+  const [showForm,setShowForm]=useState(false);
+  const [editId,setEditId]=useState(null);
+  const [filterZone,setFilterZone]=useState("Todas");
+  const [filterStatus,setFilterStatus]=useState("Todos");
+  const [selectedBox,setSelectedBox]=useState(null);
+  const [search,setSearch]=useState("");
+  const [showSearch,setShowSearch]=useState(false);
+  const [form,setForm]=useState({number:"",zone:zones[0]||"Escritorio",priority:1,status:"Vacía",detail:1,notes:"",photo:null,items:[]});
+  const importRef=useRef(null);
 
-function App() {
-  const [user,setUser] = useState(undefined); // undefined = loading, null = not logged in
-  const [boxes,setBoxes] = useState([]);
-  const [syncing,setSyncing] = useState(false);
-  const [showForm,setShowForm] = useState(false);
-  const [editId,setEditId] = useState(null);
-  const [filterZone,setFilterZone] = useState("Todas");
-  const [filterStatus,setFilterStatus] = useState("Todos");
-  const [selectedBox,setSelectedBox] = useState(null);
-  const [search,setSearch] = useState("");
-  const [showSearch,setShowSearch] = useState(false);
-  const [form,setForm] = useState({number:"",zone:"Escritorio",priority:1,status:"Vacía",detail:1,notes:"",photo:null,items:[]});
-  const importRef = useRef(null);
-
-  // Detect ?caja= param on load
-  useEffect(()=>{
-    const params = new URLSearchParams(window.location.search);
-    const cajaParam = params.get("caja");
-    if (cajaParam) { window.__cajaParam = cajaParam; }
-  },[]);
-
-  useEffect(()=>{
-    function init() {
-      const {auth,onAuthStateChanged,db,collection,onSnapshot} = window.__firebase;
-      onAuthStateChanged(auth,(u)=>{
-        setUser(u||null);
-        if (u) {
-          const unsub = onSnapshot(collection(db,"cajas"),(snap)=>{
-            const data = snap.docs.map(d=>({...d.data(),id:d.id}));
-            data.sort((a,b)=>(a.number||"").localeCompare(b.number||""));
-            setBoxes(data);
-            if (window.__cajaParam) {
-              const found = data.find(b=>b.number===window.__cajaParam);
-              if (found) { setSelectedBox(found); window.__cajaParam = null; }
-            }
-          });
-          return unsub;
-        }
-      });
-    }
-    if (window.__firebase) init();
-    else window.addEventListener("firebase-ready", init, {once:true});
-  },[]);
-
-  async function saveBox(box) {
-    const {db,doc,setDoc} = window.__firebase;
-    setSyncing(true);
-    try { await setDoc(doc(db,"cajas",String(box.id)), box); }
-    finally { setSyncing(false); }
-  }
-
-  async function removeBox(id) {
-    const {db,doc,deleteDoc} = window.__firebase;
-    setSyncing(true);
-    try { await deleteDoc(doc(db,"cajas",String(id))); }
-    finally { setSyncing(false); }
-  }
-
-  const searchResults = useMemo(()=>{
-    if (!search.trim()) return [];
-    const q=search.toLowerCase();
-    const results=[];
-    boxes.forEach(box=>(box.items||[]).forEach(item=>{ if(item.toLowerCase().includes(q)) results.push({item,box}); }));
+  const searchResults=useMemo(()=>{
+    if(!search.trim())return[];
+    const q=search.toLowerCase(),results=[];
+    boxes.forEach(box=>(box.items||[]).forEach(item=>{if(item.toLowerCase().includes(q))results.push({item,box});}));
     return results;
   },[search,boxes]);
 
-  function handlePhoto(e) {
-    const file=e.target.files[0]; if(!file) return;
-    const reader=new FileReader();
-    reader.onload=(ev)=>setForm(f=>({...f,photo:ev.target.result}));
-    reader.readAsDataURL(file);
+  async function saveBox(box){
+    const{db,doc,setDoc}=window.__firebase;
+    setSyncing(true);
+    try{await setDoc(doc(db,"cajas",String(box.id)),box);}finally{setSyncing(false);}
+  }
+  async function removeBox(id){
+    const{db,doc,deleteDoc}=window.__firebase;
+    setSyncing(true);
+    try{await deleteDoc(doc(db,"cajas",String(id)));}finally{setSyncing(false);}
   }
 
-  const stats = useMemo(()=>({
-    total:boxes.length,
-    cerradas:boxes.filter(b=>b.status==="Cerrada").length,
+  const stats=useMemo(()=>({
+    total:boxes.length,cerradas:boxes.filter(b=>b.status==="Cerrada").length,
     enProceso:boxes.filter(b=>b.status==="En proceso").length,
-    urgentes:boxes.filter(b=>b.priority===1).length,
     entregadas:boxes.filter(b=>b.status==="Entregada").length,
     totalItems:boxes.reduce((acc,b)=>acc+(b.items?.length||0),0),
   }),[boxes]);
 
-  const progress = stats.total>0?Math.round(((stats.cerradas+stats.entregadas)/stats.total)*100):0;
-  const filtered = boxes.filter(b=>(filterZone==="Todas"||b.zone===filterZone)&&(filterStatus==="Todos"||b.status===filterStatus));
-  const allZones = ["Todas",...Array.from(new Set(boxes.map(b=>b.zone)))];
+  const progress=stats.total>0?Math.round(((stats.cerradas+stats.entregadas)/stats.total)*100):0;
+  const allZones=["Todas",...Array.from(new Set(boxes.map(b=>b.zone)))];
+  const filtered=boxes.filter(b=>(filterZone==="Todas"||b.zone===filterZone)&&(filterStatus==="Todos"||b.status===filterStatus));
 
   function openNew(){
     const nextNum=String(boxes.length+1).padStart(3,"0");
-    setForm({number:nextNum,zone:"Escritorio",priority:1,status:"Vacía",detail:1,notes:"",photo:null,items:[]});
-    setEditId(null); setShowForm(true);
+    setForm({number:nextNum,zone:zones[0]||"Escritorio",priority:1,status:"Vacía",detail:1,notes:"",photo:null,items:[]});
+    setEditId(null);setShowForm(true);
   }
   function openEdit(box){
     setForm({number:box.number,zone:box.zone,priority:box.priority,status:box.status,detail:box.detail,notes:box.notes,photo:box.photo||null,items:box.items||[]});
-    setEditId(box.id); setShowForm(true); setSelectedBox(null);
+    setEditId(box.id);setShowForm(true);setSelectedBox(null);
   }
   async function saveForm(){
-    if(!form.number||!form.zone) return;
+    if(!form.number||!form.zone)return;
     const id=editId||Date.now().toString();
-    await saveBox({...form,id});
-    setShowForm(false); setEditId(null);
+    await saveBox({...form,id});setShowForm(false);setEditId(null);
   }
 
-  function exportData() {
-    const json=JSON.stringify(boxes,null,2);
-    const blob=new Blob([json],{type:"application/json"});
-    const a=document.createElement("a");
-    a.href=URL.createObjectURL(blob);
-    a.download=`mudanza-backup-${new Date().toISOString().slice(0,10)}.json`;
-    a.click();
+  function exportData(){
+    const blob=new Blob([JSON.stringify(boxes,null,2)],{type:"application/json"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+    a.download=`mudanza-backup-${new Date().toISOString().slice(0,10)}.json`;a.click();
   }
-  async function importData(e) {
-    const file=e.target.files[0]; if(!file) return;
+  async function importData(e){
+    const file=e.target.files[0];if(!file)return;
     const reader=new FileReader();
     reader.onload=async(ev)=>{
-      try {
-        const data=JSON.parse(ev.target.result);
-        if(Array.isArray(data)){ for(const box of data) await saveBox(box); alert(`✓ ${data.length} cajas importadas`); }
+      try{const data=JSON.parse(ev.target.result);
+        if(Array.isArray(data)){for(const box of data)await saveBox(box);alert(`✓ ${data.length} cajas importadas`);}
         else alert("Archivo inválido");
-      } catch { alert("Error al leer el archivo"); }
+      }catch{alert("Error al leer el archivo");}
     };
-    reader.readAsText(file); e.target.value="";
+    reader.readAsText(file);e.target.value="";
   }
 
-  const statusStyle = (s) =>
-    s==="Cerrada"?{background:"#0d0d0d",color:"#fff"}:
+  const statusStyle=(s)=>s==="Cerrada"?{background:"#0d0d0d",color:"#fff"}:
     s==="En proceso"?{background:"#fff7ed",color:"#ea580c",border:"1px solid #fed7aa"}:
     s==="Entregada"?{background:"#e5e7eb",color:"#6b7280",textDecoration:"line-through"}:
     {background:"#f3f4f6",color:"#6b7280"};
 
-  // Loading
-  if (user===undefined) return (
-    <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:"#9ca3af",fontSize:13}}>
-      Cargando…
-    </div>
-  );
-
-  // Not logged in
-  if (user===null) return <LoginScreen />;
-
   return (
-    <div style={{minHeight:"100vh",background:"#fff",fontFamily:"Inter,sans-serif"}}>
+    <div className="page">
       {/* Header */}
       <div style={{borderBottom:"1px solid #f3f4f6",padding:16,position:"sticky",top:0,background:"#fff",zIndex:10}}>
-        {showSearch ? (
+        {showSearch?(
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
             <input autoFocus style={{flex:1,border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontSize:13}}
-              placeholder="Buscar ítem en todas las cajas..." value={search} onChange={e=>setSearch(e.target.value)} />
+              placeholder="Buscar ítem..." value={search} onChange={e=>setSearch(e.target.value)} />
             <button onClick={()=>{setShowSearch(false);setSearch("");}} style={{color:"#9ca3af",fontSize:13,padding:"0 8px"}}>✕</button>
           </div>
-        ) : (
+        ):(
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
             <div>
               <h1 style={{fontSize:18,fontWeight:900,fontFamily:"Space Grotesk,sans-serif",color:"#0d0d0d",letterSpacing:"-0.02em"}}>
-                MUDANZA {syncing&&<span style={{fontSize:11,color:"#9ca3af",fontWeight:400,fontFamily:"Inter,sans-serif"}}>guardando…</span>}
+                CAJAS {syncing&&<span style={{fontSize:11,color:"#9ca3af",fontWeight:400,fontFamily:"Inter,sans-serif"}}>guardando…</span>}
               </h1>
               <p style={{fontSize:11,color:"#9ca3af",marginTop:2}}>{stats.total} cajas · {stats.totalItems} ítems · {progress}% empacado</p>
             </div>
-            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <div style={{display:"flex",gap:8}}>
               <button onClick={()=>setShowSearch(true)} style={{border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontSize:13,color:"#4b5563"}}>🔍</button>
-              <button onClick={exportData} title="Exportar backup" style={{border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontSize:13,color:"#4b5563"}}>⬇️</button>
-              <label title="Importar backup" style={{border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontSize:13,color:"#4b5563",cursor:"pointer",display:"flex",alignItems:"center"}}>
+              <button onClick={exportData} style={{border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontSize:13,color:"#4b5563"}}>⬇️</button>
+              <label style={{border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontSize:13,color:"#4b5563",cursor:"pointer",display:"flex",alignItems:"center"}}>
                 ⬆️<input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={importData} />
               </label>
               <button onClick={openNew} style={{background:"#0d0d0d",color:"#fff",borderRadius:10,padding:"8px 16px",fontSize:13,fontWeight:600}}>+ Caja</button>
-              <button onClick={()=>window.__firebase.signOut(window.__firebase.auth)} title="Cerrar sesión"
-                style={{border:"1px solid #f3f4f6",borderRadius:10,padding:"8px",fontSize:11,color:"#9ca3af"}}>
-                <img src={user.photoURL} width={24} height={24} style={{borderRadius:"50%",display:"block"}} onError={e=>e.target.style.display="none"} />
-              </button>
             </div>
           </div>
         )}
         {showSearch&&search.trim()&&(
           <div style={{marginTop:8,border:"1px solid #f3f4f6",borderRadius:14,overflow:"hidden",boxShadow:"0 1px 4px rgba(0,0,0,0.08)"}}>
-            {searchResults.length===0
-              ? <p style={{fontSize:13,color:"#9ca3af",textAlign:"center",padding:16}}>Sin resultados para "{search}"</p>
-              : <ul style={{listStyle:"none"}}>
-                  {searchResults.map((r,i)=>(
-                    <li key={i} onClick={()=>{setSelectedBox(r.box);setShowSearch(false);setSearch("");}}
-                      style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:"1px solid #f9fafb",cursor:"pointer"}}>
-                      <span style={{flex:1,fontSize:13,color:"#0d0d0d"}}>{r.item}</span>
-                      <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                        <span style={{fontSize:11,fontFamily:"monospace",fontWeight:700}}>#{r.box.number}</span>
-                        <span style={{fontSize:11,color:"#9ca3af"}}>{r.box.zone}</span>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
+            {searchResults.length===0?<p style={{fontSize:13,color:"#9ca3af",textAlign:"center",padding:16}}>Sin resultados</p>
+              :<ul style={{listStyle:"none"}}>
+                {searchResults.map((r,i)=>(
+                  <li key={i} onClick={()=>{setSelectedBox(r.box);setShowSearch(false);setSearch("");}}
+                    style={{display:"flex",alignItems:"center",gap:12,padding:"12px 16px",borderBottom:"1px solid #f9fafb",cursor:"pointer"}}>
+                    <span style={{flex:1,fontSize:13,color:"#0d0d0d"}}>{r.item}</span>
+                    <span style={{fontSize:11,fontFamily:"monospace",fontWeight:700}}>#{r.box.number}</span>
+                    <span style={{fontSize:11,color:"#9ca3af"}}>{r.box.zone}</span>
+                  </li>
+                ))}
+              </ul>
             }
           </div>
         )}
@@ -411,15 +359,13 @@ function App() {
           </div>
         </div>
 
-        {/* Stats */}
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
-          <StatCard label="Total" value={stats.total} />
-          <StatCard label="Cerradas" value={stats.cerradas} accent />
-          <StatCard label="En proceso" value={stats.enProceso} />
-          <StatCard label="Ítems" value={stats.totalItems} />
+          <StatCard label="Total" value={stats.total}/>
+          <StatCard label="Cerradas" value={stats.cerradas} accent/>
+          <StatCard label="En proceso" value={stats.enProceso}/>
+          <StatCard label="Ítems" value={stats.totalItems}/>
         </div>
 
-        {/* Zone bars */}
         {boxes.length>0&&(
           <div style={{borderRadius:14,border:"1px solid #f3f4f6",padding:16}}>
             <p style={{fontSize:11,textTransform:"uppercase",letterSpacing:"0.1em",color:"#9ca3af",fontWeight:500,marginBottom:12}}>Estado por zona</p>
@@ -428,7 +374,7 @@ function App() {
                 const zc=boxes.filter(b=>b.zone===zone);
                 const done=zc.filter(b=>b.status==="Cerrada"||b.status==="Entregada").length;
                 const pct=Math.round((done/zc.length)*100);
-                return (
+                return(
                   <div key={zone} style={{display:"flex",alignItems:"center",gap:12}}>
                     <span style={{fontSize:13,fontWeight:500,color:"#0d0d0d",width:96,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{zone}</span>
                     <div style={{flex:1,height:6,background:"#f3f4f6",borderRadius:99,overflow:"hidden"}}>
@@ -442,9 +388,8 @@ function App() {
           </div>
         )}
 
-        <HierarchyLegend />
+        <HierarchyLegend/>
 
-        {/* Filters */}
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
           {allZones.map(z=>(
             <button key={z} onClick={()=>setFilterZone(z)} style={{fontSize:11,padding:"6px 12px",borderRadius:99,fontWeight:500,
@@ -460,19 +405,12 @@ function App() {
           ))}
         </div>
 
-        {/* Box list */}
         <div style={{display:"flex",flexDirection:"column",gap:12}}>
-          {boxes.length===0&&(
-            <div style={{textAlign:"center",padding:"48px 0",color:"#d1d5db"}}>
-              <p style={{fontSize:36,marginBottom:8}}>📦</p>
-              <p style={{fontSize:13}}>Todavía no hay cajas. ¡Agregá la primera!</p>
-            </div>
-          )}
+          {boxes.length===0&&<div style={{textAlign:"center",padding:"48px 0",color:"#d1d5db"}}><p style={{fontSize:36,marginBottom:8}}>📦</p><p style={{fontSize:13}}>Todavía no hay cajas</p></div>}
           {filtered.map(box=>(
             <div key={box.id} style={{borderRadius:14,border:"1px solid #f3f4f6",overflow:"hidden"}}>
-              <div onClick={()=>setSelectedBox(selectedBox?.id===box.id?null:box)}
-                style={{display:"flex",alignItems:"center",gap:12,padding:12,cursor:"pointer"}}>
-                <LabelPreview box={box} />
+              <div onClick={()=>setSelectedBox(selectedBox?.id===box.id?null:box)} style={{display:"flex",alignItems:"center",gap:12,padding:12,cursor:"pointer"}}>
+                <LabelPreview box={box}/>
                 <div style={{flex:1,minWidth:0}}>
                   <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
                     <span style={{fontWeight:900,fontFamily:"Space Grotesk,sans-serif",color:"#0d0d0d"}}>#{box.number}</span>
@@ -490,49 +428,24 @@ function App() {
               {selectedBox?.id===box.id&&(
                 <div style={{borderTop:"1px solid #f3f4f6",padding:12,background:"#f9fafb",display:"flex",flexDirection:"column",gap:16}}>
                   <div style={{display:"flex",alignItems:"flex-start",gap:12}}>
-                    <img src={QR_URL(box.number)} alt="QR" width={72} height={72}
-                      style={{borderRadius:8,border:"1px solid #e5e7eb",background:"#fff",padding:4,flexShrink:0}} />
+                    <img src={QR_URL(box.number)} alt="QR" width={72} height={72} style={{borderRadius:8,border:"1px solid #e5e7eb",background:"#fff",padding:4,flexShrink:0}}/>
                     <div style={{display:"flex",flexDirection:"column",gap:4}}>
                       <p style={{fontSize:11,color:"#9ca3af"}}>Nivel de detalle</p>
                       <p style={{fontSize:13,fontWeight:600,color:"#0d0d0d"}}>{DETAIL_LEVELS[box.detail]}</p>
                       {box.notes&&<><p style={{fontSize:11,color:"#9ca3af",marginTop:4}}>Notas</p><p style={{fontSize:13,color:"#0d0d0d"}}>{box.notes}</p></>}
                     </div>
                   </div>
-
                   <div>
                     <p style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>
                       Contenido {box.items?.length>0&&<span style={{textTransform:"none",color:"#d1d5db"}}>— {box.items.length} ítems</span>}
                     </p>
                     <ItemList items={box.items||[]}
                       onAdd={item=>saveBox({...box,items:[...(box.items||[]),item]})}
-                      onRemove={idx=>saveBox({...box,items:(box.items||[]).filter((_,i)=>i!==idx)})} />
+                      onRemove={idx=>saveBox({...box,items:(box.items||[]).filter((_,i)=>i!==idx)})}/>
                   </div>
-
-                  {box.photo?(
-                    <div style={{display:"flex",flexDirection:"column",gap:6}}>
-                      <p style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em"}}>Foto interior</p>
-                      <div style={{position:"relative"}}>
-                        <img src={box.photo} alt="Interior" style={{width:"100%",borderRadius:10,objectFit:"cover",border:"1px solid #f3f4f6",maxHeight:220}} />
-                        <button onClick={()=>saveBox({...box,photo:null})} style={{position:"absolute",top:8,right:8,background:"rgba(0,0,0,0.6)",color:"#fff",borderRadius:"50%",width:24,height:24,fontSize:11,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
-                      </div>
-                    </div>
-                  ):(
-                    <label style={{display:"flex",alignItems:"center",gap:8,border:"1px dashed #e5e7eb",borderRadius:10,padding:12,cursor:"pointer"}}>
-                      <span style={{fontSize:18}}>📷</span>
-                      <div>
-                        <p style={{fontSize:13,fontWeight:500,color:"#0d0d0d"}}>Agregar foto interior</p>
-                        <p style={{fontSize:11,color:"#9ca3af"}}>Cámara o galería</p>
-                      </div>
-                      <input type="file" accept="image/*" capture="environment" style={{display:"none"}}
-                        onChange={e=>{
-                          const file=e.target.files[0]; if(!file) return;
-                          const reader=new FileReader();
-                          reader.onload=(ev)=>saveBox({...box,photo:ev.target.result});
-                          reader.readAsDataURL(file);
-                        }} />
-                    </label>
-                  )}
-
+                  <PhotoField photo={box.photo}
+                    onAdd={photo=>saveBox({...box,photo})}
+                    onRemove={()=>saveBox({...box,photo:null})}/>
                   <div>
                     <p style={{fontSize:11,color:"#9ca3af",marginBottom:6}}>Cambiar estado</p>
                     <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
@@ -543,15 +456,11 @@ function App() {
                       ))}
                     </div>
                   </div>
-
                   <div style={{display:"flex",gap:8}}>
                     <button onClick={()=>openEdit(box)} style={{flex:1,fontSize:13,border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 0",fontWeight:500,color:"#0d0d0d",background:"#fff"}}>Editar</button>
-                    <button onClick={async()=>{
-                      const png=await generateLabelPNG(box);
-                      const a=document.createElement("a");
-                      a.href=png; a.download=`etiqueta-${box.number}-${box.zone}.png`; a.click();
-                    }} style={{fontSize:13,border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontWeight:500,color:"#0d0d0d",background:"#fff"}}>🖨️</button>
-                    <button onClick={async()=>{ await removeBox(box.id); setSelectedBox(null); }}
+                    <button onClick={async()=>{const png=await generateLabelPNG(box);const a=document.createElement("a");a.href=png;a.download=`etiqueta-${box.number}-${box.zone}.png`;a.click();}}
+                      style={{fontSize:13,border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontWeight:500,color:"#0d0d0d",background:"#fff"}}>🖨️</button>
+                    <button onClick={async()=>{await removeBox(box.id);setSelectedBox(null);}}
                       style={{fontSize:13,border:"1px solid #fee2e2",borderRadius:10,padding:"8px 16px",fontWeight:500,color:"#f87171",background:"#fff"}}>Eliminar</button>
                   </div>
                 </div>
@@ -561,7 +470,7 @@ function App() {
         </div>
       </div>
 
-      {/* Modal */}
+      {/* Modal nueva/editar caja */}
       {showForm&&(
         <div onClick={e=>e.target===e.currentTarget&&setShowForm(false)}
           style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:50,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
@@ -574,14 +483,11 @@ function App() {
               <div>
                 <label style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",display:"block",marginBottom:4}}>Número</label>
                 <input style={{width:"100%",border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontSize:13,fontFamily:"monospace"}}
-                  value={form.number} onChange={e=>setForm({...form,number:e.target.value})} placeholder="001" />
+                  value={form.number} onChange={e=>setForm({...form,number:e.target.value})} placeholder="001"/>
               </div>
               <div>
                 <label style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",display:"block",marginBottom:4}}>Zona</label>
-                <select style={{width:"100%",border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontSize:13,background:"#fff"}}
-                  value={form.zone} onChange={e=>setForm({...form,zone:e.target.value})}>
-                  {ZONES.map(z=><option key={z}>{z}</option>)}
-                </select>
+                <ZoneSelect value={form.zone} onChange={v=>setForm({...form,zone:v})} zones={zones} onAddZone={onAddZone}/>
               </div>
               <div>
                 <label style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",display:"block",marginBottom:4}}>Prioridad</label>
@@ -612,45 +518,27 @@ function App() {
                   {[1,2,3].map(d=>(
                     <button key={d} onClick={()=>setForm({...form,detail:d})} style={{flex:1,padding:"8px 4px",borderRadius:10,fontSize:11,fontWeight:500,
                       background:form.detail===d?"#0d0d0d":"#fff",color:form.detail===d?"#fff":"#6b7280",
-                      border:form.detail===d?"1px solid #0d0d0d":"1px solid #e5e7eb"}}>
-                      {DETAIL_LEVELS[d]}
-                    </button>
+                      border:form.detail===d?"1px solid #0d0d0d":"1px solid #e5e7eb"}}>{DETAIL_LEVELS[d]}</button>
                   ))}
                 </div>
               </div>
               <div>
                 <label style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",display:"block",marginBottom:8}}>Contenido</label>
-                <ItemList items={form.items||[]}
-                  onAdd={item=>setForm(f=>({...f,items:[...(f.items||[]),item]}))}
-                  onRemove={idx=>setForm(f=>({...f,items:f.items.filter((_,i)=>i!==idx)}))} />
+                <ItemList items={form.items||[]} onAdd={item=>setForm(f=>({...f,items:[...(f.items||[]),item]}))} onRemove={idx=>setForm(f=>({...f,items:f.items.filter((_,i)=>i!==idx)}))}/>
               </div>
               <div>
                 <label style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",display:"block",marginBottom:4}}>Notas</label>
                 <textarea style={{width:"100%",border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontSize:13,resize:"none"}}
-                  rows={2} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} placeholder="Observaciones..." />
+                  rows={2} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} placeholder="Observaciones..."/>
               </div>
               <div>
                 <label style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",display:"block",marginBottom:4}}>Foto interior</label>
-                {form.photo?(
-                  <div style={{position:"relative"}}>
-                    <img src={form.photo} alt="Interior" style={{width:"100%",borderRadius:10,objectFit:"cover",border:"1px solid #f3f4f6",maxHeight:180}} />
-                    <button onClick={()=>setForm(f=>({...f,photo:null}))} style={{position:"absolute",top:8,right:8,background:"rgba(0,0,0,0.6)",color:"#fff",borderRadius:"50%",width:24,height:24,fontSize:11,display:"flex",alignItems:"center",justifyContent:"center"}}>✕</button>
-                  </div>
-                ):(
-                  <label style={{display:"flex",alignItems:"center",gap:12,border:"1px dashed #e5e7eb",borderRadius:10,padding:12,cursor:"pointer"}}>
-                    <span style={{fontSize:20}}>📷</span>
-                    <div>
-                      <p style={{fontSize:13,fontWeight:500,color:"#0d0d0d"}}>Agregar foto interior</p>
-                      <p style={{fontSize:11,color:"#9ca3af"}}>Opcional · cámara o galería</p>
-                    </div>
-                    <input type="file" accept="image/*" capture="environment" style={{display:"none"}} onChange={handlePhoto} />
-                  </label>
-                )}
+                <PhotoField photo={form.photo} onAdd={photo=>setForm({...form,photo})} onRemove={()=>setForm({...form,photo:null})}/>
               </div>
             </div>
             <div>
               <p style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Vista previa etiqueta</p>
-              <LabelPreview box={form} />
+              <LabelPreview box={form}/>
             </div>
             <button onClick={saveForm} style={{width:"100%",background:"#0d0d0d",color:"#fff",fontWeight:700,padding:"12px 0",borderRadius:14,fontSize:14}}>
               {editId?"Guardar cambios":"Crear caja"}
@@ -662,12 +550,434 @@ function App() {
   );
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+// ─── Tab: Objetos grandes ───────────────────────────────────────────────────
+function TabObjetos({objetos,setObjetos,zones,onAddZone,syncing,setSyncing}) {
+  const [showForm,setShowForm]=useState(false);
+  const [editId,setEditId]=useState(null);
+  const [selected,setSelected]=useState(null);
+  const [filterZone,setFilterZone]=useState("Todas");
+  const [form,setForm]=useState({name:"",w:"",d:"",h:"",units:1,zone:zones[0]||"Escritorio",photo:null,notes:""});
+
+  async function saveObj(obj){
+    const{db,doc,setDoc}=window.__firebase;
+    setSyncing(true);
+    try{await setDoc(doc(db,"objetos",String(obj.id)),obj);}finally{setSyncing(false);}
+  }
+  async function removeObj(id){
+    const{db,doc,deleteDoc}=window.__firebase;
+    setSyncing(true);
+    try{await deleteDoc(doc(db,"objetos",String(id)));}finally{setSyncing(false);}
+  }
+
+  function openNew(){
+    setForm({name:"",w:"",d:"",h:"",units:1,zone:zones[0]||"Escritorio",photo:null,notes:""});
+    setEditId(null);setShowForm(true);
+  }
+  function openEdit(obj){
+    setForm({name:obj.name,w:obj.w,d:obj.d,h:obj.h,units:obj.units,zone:obj.zone,photo:obj.photo||null,notes:obj.notes||""});
+    setEditId(obj.id);setShowForm(true);setSelected(null);
+  }
+  async function saveForm(){
+    if(!form.name)return;
+    const id=editId||Date.now().toString();
+    await saveObj({...form,w:Number(form.w)||0,d:Number(form.d)||0,h:Number(form.h)||0,units:Number(form.units)||1,id});
+    setShowForm(false);setEditId(null);
+  }
+
+  const allZones=["Todas",...Array.from(new Set(objetos.map(o=>o.zone)))];
+  const filtered=objetos.filter(o=>filterZone==="Todas"||o.zone===filterZone);
+
+  return (
+    <div className="page">
+      <div style={{borderBottom:"1px solid #f3f4f6",padding:16,position:"sticky",top:0,background:"#fff",zIndex:10}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div>
+            <h1 style={{fontSize:18,fontWeight:900,fontFamily:"Space Grotesk,sans-serif",color:"#0d0d0d",letterSpacing:"-0.02em"}}>
+              OBJETOS {syncing&&<span style={{fontSize:11,color:"#9ca3af",fontWeight:400,fontFamily:"Inter,sans-serif"}}>guardando…</span>}
+            </h1>
+            <p style={{fontSize:11,color:"#9ca3af",marginTop:2}}>{objetos.length} objetos registrados</p>
+          </div>
+          <button onClick={openNew} style={{background:"#0d0d0d",color:"#fff",borderRadius:10,padding:"8px 16px",fontSize:13,fontWeight:600}}>+ Objeto</button>
+        </div>
+      </div>
+
+      <div style={{maxWidth:640,margin:"0 auto",padding:"20px 16px",display:"flex",flexDirection:"column",gap:16}}>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {allZones.map(z=>(
+            <button key={z} onClick={()=>setFilterZone(z)} style={{fontSize:11,padding:"6px 12px",borderRadius:99,fontWeight:500,
+              background:filterZone===z?"#0d0d0d":"#fff",color:filterZone===z?"#fff":"#4b5563",
+              border:filterZone===z?"1px solid #0d0d0d":"1px solid #e5e7eb"}}>{z}</button>
+          ))}
+        </div>
+
+        {filtered.length===0&&<div style={{textAlign:"center",padding:"48px 0",color:"#d1d5db"}}><p style={{fontSize:36,marginBottom:8}}>🛋️</p><p style={{fontSize:13}}>Sin objetos cargados</p></div>}
+        {filtered.map(obj=>(
+          <div key={obj.id} style={{borderRadius:14,border:"1px solid #f3f4f6",overflow:"hidden"}}>
+            <div onClick={()=>setSelected(selected?.id===obj.id?null:obj)} style={{display:"flex",alignItems:"center",gap:12,padding:12,cursor:"pointer"}}>
+              <div style={{width:44,height:44,borderRadius:10,background:"#f9fafb",border:"1px solid #f3f4f6",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>
+                🛋️
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                  <span style={{fontWeight:700,color:"#0d0d0d",fontSize:14}}>{obj.name}</span>
+                  {obj.units>1&&<span style={{fontSize:11,padding:"2px 8px",borderRadius:99,background:"#f3f4f6",color:"#6b7280"}}>×{obj.units}</span>}
+                  {obj.photo&&<span style={{fontSize:11,color:"#9ca3af"}}>📷</span>}
+                </div>
+                <p style={{fontSize:11,color:"#9ca3af",marginTop:2}}>
+                  {obj.zone}{obj.w||obj.d||obj.h?` · ${obj.w}×${obj.d}×${obj.h} cm`:""}
+                </p>
+              </div>
+              <span style={{fontSize:11,color:"#d1d5db"}}>{selected?.id===obj.id?"▲":"▼"}</span>
+            </div>
+
+            {selected?.id===obj.id&&(
+              <div style={{borderTop:"1px solid #f3f4f6",padding:12,background:"#f9fafb",display:"flex",flexDirection:"column",gap:12}}>
+                {/* Dimensions */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                  {[["Ancho",obj.w],["Prof.",obj.d],["Alto",obj.h]].map(([label,val])=>(
+                    <div key={label} style={{background:"#fff",borderRadius:10,border:"1px solid #f3f4f6",padding:"10px 12px",textAlign:"center"}}>
+                      <p style={{fontSize:10,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.08em",marginBottom:2}}>{label}</p>
+                      <p style={{fontSize:18,fontWeight:700,color:"#0d0d0d",fontFamily:"Space Grotesk,sans-serif"}}>{val||"—"}</p>
+                      {val?<p style={{fontSize:10,color:"#9ca3af"}}>cm</p>:null}
+                    </div>
+                  ))}
+                </div>
+                {obj.units>1&&<p style={{fontSize:13,color:"#6b7280"}}>Unidades: <strong>{obj.units}</strong></p>}
+                {obj.notes&&<p style={{fontSize:13,color:"#0d0d0d"}}>{obj.notes}</p>}
+                <PhotoField photo={obj.photo} onAdd={photo=>saveObj({...obj,photo})} onRemove={()=>saveObj({...obj,photo:null})}/>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>openEdit(obj)} style={{flex:1,fontSize:13,border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 0",fontWeight:500,color:"#0d0d0d",background:"#fff"}}>Editar</button>
+                  <button onClick={async()=>{await removeObj(obj.id);setSelected(null);}}
+                    style={{fontSize:13,border:"1px solid #fee2e2",borderRadius:10,padding:"8px 16px",fontWeight:500,color:"#f87171",background:"#fff"}}>Eliminar</button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {showForm&&(
+        <div onClick={e=>e.target===e.currentTarget&&setShowForm(false)}
+          style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:50,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+          <div style={{background:"#fff",width:"100%",maxWidth:448,borderRadius:"18px 18px 0 0",padding:20,display:"flex",flexDirection:"column",gap:16,maxHeight:"90vh",overflowY:"auto"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <h2 style={{fontWeight:900,fontFamily:"Space Grotesk,sans-serif",fontSize:18,color:"#0d0d0d"}}>{editId?"Editar objeto":"Nuevo objeto"}</h2>
+              <button onClick={()=>setShowForm(false)} style={{color:"#9ca3af",fontSize:20}}>✕</button>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div>
+                <label style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",display:"block",marginBottom:4}}>Nombre</label>
+                <input style={{width:"100%",border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontSize:13}}
+                  value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Ej: Heladera, Sofá..."/>
+              </div>
+              <div>
+                <label style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",display:"block",marginBottom:4}}>Dimensiones (cm)</label>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                  {[["Ancho","w"],["Prof.","d"],["Alto","h"]].map(([label,key])=>(
+                    <div key={key}>
+                      <label style={{fontSize:10,color:"#9ca3af",display:"block",marginBottom:3}}>{label}</label>
+                      <input type="number" style={{width:"100%",border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 10px",fontSize:13}}
+                        value={form[key]} onChange={e=>setForm({...form,[key]:e.target.value})} placeholder="0"/>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <label style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",display:"block",marginBottom:4}}>Unidades</label>
+                <input type="number" min="1" style={{width:"100%",border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontSize:13}}
+                  value={form.units} onChange={e=>setForm({...form,units:e.target.value})}/>
+              </div>
+              <div>
+                <label style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",display:"block",marginBottom:4}}>Espacio destino</label>
+                <ZoneSelect value={form.zone} onChange={v=>setForm({...form,zone:v})} zones={zones} onAddZone={onAddZone}/>
+              </div>
+              <div>
+                <label style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",display:"block",marginBottom:4}}>Notas</label>
+                <textarea style={{width:"100%",border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontSize:13,resize:"none"}}
+                  rows={2} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} placeholder="Observaciones..."/>
+              </div>
+              <div>
+                <label style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",display:"block",marginBottom:4}}>Foto</label>
+                <PhotoField photo={form.photo} onAdd={photo=>setForm({...form,photo})} onRemove={()=>setForm({...form,photo:null})}/>
+              </div>
+            </div>
+            <button onClick={saveForm} style={{width:"100%",background:"#0d0d0d",color:"#fff",fontWeight:700,padding:"12px 0",borderRadius:14,fontSize:14}}>
+              {editId?"Guardar cambios":"Agregar objeto"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Tab: Último momento ────────────────────────────────────────────────────
+function TabUltimo({items,setItems,zones,onAddZone,syncing,setSyncing}) {
+  const [showForm,setShowForm]=useState(false);
+  const [editId,setEditId]=useState(null);
+  const [selected,setSelected]=useState(null);
+  const [filterZone,setFilterZone]=useState("Todas");
+  const [form,setForm]=useState({name:"",zone:zones[0]||"Escritorio",photo:null,notes:""});
+
+  async function saveItem(item){
+    const{db,doc,setDoc}=window.__firebase;
+    setSyncing(true);
+    try{await setDoc(doc(db,"ultimo",String(item.id)),item);}finally{setSyncing(false);}
+  }
+  async function removeItem(id){
+    const{db,doc,deleteDoc}=window.__firebase;
+    setSyncing(true);
+    try{await deleteDoc(doc(db,"ultimo",String(id)));}finally{setSyncing(false);}
+  }
+
+  function openNew(){
+    setForm({name:"",zone:zones[0]||"Escritorio",photo:null,notes:"",done:false});
+    setEditId(null);setShowForm(true);
+  }
+  function openEdit(item){
+    setForm({name:item.name,zone:item.zone,photo:item.photo||null,notes:item.notes||"",done:item.done||false});
+    setEditId(item.id);setShowForm(true);setSelected(null);
+  }
+  async function saveForm(){
+    if(!form.name)return;
+    const id=editId||Date.now().toString();
+    await saveItem({...form,id});setShowForm(false);setEditId(null);
+  }
+  async function toggleDone(item){
+    await saveItem({...item,done:!item.done});
+  }
+
+  const allZones=["Todas",...Array.from(new Set(items.map(o=>o.zone)))];
+  const filtered=items.filter(o=>filterZone==="Todas"||o.zone===filterZone);
+  const pending=items.filter(i=>!i.done).length;
+
+  return (
+    <div className="page">
+      <div style={{borderBottom:"1px solid #f3f4f6",padding:16,position:"sticky",top:0,background:"#fff",zIndex:10}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div>
+            <h1 style={{fontSize:18,fontWeight:900,fontFamily:"Space Grotesk,sans-serif",color:"#0d0d0d",letterSpacing:"-0.02em"}}>
+              ÚLTIMO MOMENTO {syncing&&<span style={{fontSize:11,color:"#9ca3af",fontWeight:400,fontFamily:"Inter,sans-serif"}}>guardando…</span>}
+            </h1>
+            <p style={{fontSize:11,color:"#9ca3af",marginTop:2}}>{pending} pendiente{pending!==1?"s":""} de {items.length}</p>
+          </div>
+          <button onClick={openNew} style={{background:"#0d0d0d",color:"#fff",borderRadius:10,padding:"8px 16px",fontSize:13,fontWeight:600}}>+ Item</button>
+        </div>
+      </div>
+
+      <div style={{maxWidth:640,margin:"0 auto",padding:"20px 16px",display:"flex",flexDirection:"column",gap:16}}>
+        {/* Progress */}
+        {items.length>0&&(
+          <div>
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:6}}>
+              <span style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em"}}>Guardado</span>
+              <span style={{fontSize:11,fontWeight:700,color:"#0d0d0d"}}>{items.length>0?Math.round(((items.length-pending)/items.length)*100):0}%</span>
+            </div>
+            <div style={{height:8,background:"#f3f4f6",borderRadius:99,overflow:"hidden"}}>
+              <div style={{height:"100%",background:"#0d0d0d",borderRadius:99,width:`${items.length>0?Math.round(((items.length-pending)/items.length)*100):0}%`,transition:"width 0.5s"}}/>
+            </div>
+          </div>
+        )}
+
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          {allZones.map(z=>(
+            <button key={z} onClick={()=>setFilterZone(z)} style={{fontSize:11,padding:"6px 12px",borderRadius:99,fontWeight:500,
+              background:filterZone===z?"#0d0d0d":"#fff",color:filterZone===z?"#fff":"#4b5563",
+              border:filterZone===z?"1px solid #0d0d0d":"1px solid #e5e7eb"}}>{z}</button>
+          ))}
+        </div>
+
+        {filtered.length===0&&<div style={{textAlign:"center",padding:"48px 0",color:"#d1d5db"}}><p style={{fontSize:36,marginBottom:8}}>⏰</p><p style={{fontSize:13}}>Sin ítems cargados</p></div>}
+        {filtered.map(item=>(
+          <div key={item.id} style={{borderRadius:14,border:"1px solid #f3f4f6",overflow:"hidden",opacity:item.done?0.6:1}}>
+            <div style={{display:"flex",alignItems:"center",gap:12,padding:12}}>
+              {/* Checkbox */}
+              <button onClick={()=>toggleDone(item)} style={{width:28,height:28,borderRadius:8,border:item.done?"2px solid #0d0d0d":"2px solid #e5e7eb",
+                background:item.done?"#0d0d0d":"#fff",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center",fontSize:14}}>
+                {item.done&&<span style={{color:"#fff"}}>✓</span>}
+              </button>
+              <div style={{flex:1,minWidth:0,cursor:"pointer"}} onClick={()=>setSelected(selected?.id===item.id?null:item)}>
+                <p style={{fontSize:14,fontWeight:600,color:"#0d0d0d",textDecoration:item.done?"line-through":"none"}}>{item.name}</p>
+                <p style={{fontSize:11,color:"#9ca3af",marginTop:1}}>{item.zone}{item.notes?` · ${item.notes}`:""}</p>
+              </div>
+              {item.photo&&<span style={{fontSize:11,color:"#9ca3af"}}>📷</span>}
+              <span style={{fontSize:11,color:"#d1d5db",cursor:"pointer"}} onClick={()=>setSelected(selected?.id===item.id?null:item)}>{selected?.id===item.id?"▲":"▼"}</span>
+            </div>
+
+            {selected?.id===item.id&&(
+              <div style={{borderTop:"1px solid #f3f4f6",padding:12,background:"#f9fafb",display:"flex",flexDirection:"column",gap:12}}>
+                <PhotoField photo={item.photo} onAdd={photo=>saveItem({...item,photo})} onRemove={()=>saveItem({...item,photo:null})}/>
+                <div style={{display:"flex",gap:8}}>
+                  <button onClick={()=>openEdit(item)} style={{flex:1,fontSize:13,border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 0",fontWeight:500,color:"#0d0d0d",background:"#fff"}}>Editar</button>
+                  <button onClick={async()=>{await removeItem(item.id);setSelected(null);}}
+                    style={{fontSize:13,border:"1px solid #fee2e2",borderRadius:10,padding:"8px 16px",fontWeight:500,color:"#f87171",background:"#fff"}}>Eliminar</button>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {showForm&&(
+        <div onClick={e=>e.target===e.currentTarget&&setShowForm(false)}
+          style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:50,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+          <div style={{background:"#fff",width:"100%",maxWidth:448,borderRadius:"18px 18px 0 0",padding:20,display:"flex",flexDirection:"column",gap:16,maxHeight:"90vh",overflowY:"auto"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <h2 style={{fontWeight:900,fontFamily:"Space Grotesk,sans-serif",fontSize:18,color:"#0d0d0d"}}>{editId?"Editar ítem":"Nuevo ítem"}</h2>
+              <button onClick={()=>setShowForm(false)} style={{color:"#9ca3af",fontSize:20}}>✕</button>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:12}}>
+              <div>
+                <label style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",display:"block",marginBottom:4}}>Nombre</label>
+                <input style={{width:"100%",border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontSize:13}}
+                  value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Ej: Notebook, Plantas..."/>
+              </div>
+              <div>
+                <label style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",display:"block",marginBottom:4}}>Espacio destino</label>
+                <ZoneSelect value={form.zone} onChange={v=>setForm({...form,zone:v})} zones={zones} onAddZone={onAddZone}/>
+              </div>
+              <div>
+                <label style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",display:"block",marginBottom:4}}>Notas</label>
+                <textarea style={{width:"100%",border:"1px solid #e5e7eb",borderRadius:10,padding:"8px 12px",fontSize:13,resize:"none"}}
+                  rows={2} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} placeholder="Observaciones..."/>
+              </div>
+              <div>
+                <label style={{fontSize:11,color:"#9ca3af",textTransform:"uppercase",letterSpacing:"0.1em",display:"block",marginBottom:4}}>Foto</label>
+                <PhotoField photo={form.photo} onAdd={photo=>setForm({...form,photo})} onRemove={()=>setForm({...form,photo:null})}/>
+              </div>
+            </div>
+            <button onClick={saveForm} style={{width:"100%",background:"#0d0d0d",color:"#fff",fontWeight:700,padding:"12px 0",borderRadius:14,fontSize:14}}>
+              {editId?"Guardar cambios":"Agregar ítem"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Login ──────────────────────────────────────────────────────────────────
+function LoginScreen() {
+  const [loading,setLoading]=useState(false);
+  async function login(){
+    setLoading(true);
+    try{const{auth,provider,signInWithPopup}=window.__firebase;await signInWithPopup(auth,provider);}
+    catch(e){console.error(e);setLoading(false);}
+  }
+  return (
+    <div style={{minHeight:"100vh",background:"#fff",display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:24,padding:24}}>
+      <div style={{textAlign:"center"}}>
+        <p style={{fontSize:48,marginBottom:8}}>📦</p>
+        <h1 style={{fontSize:32,fontWeight:900,fontFamily:"Space Grotesk,sans-serif",color:"#0d0d0d",letterSpacing:"-0.02em"}}>MUDANZA</h1>
+        <p style={{fontSize:13,color:"#9ca3af",marginTop:6}}>Gestión de cajas · privado y seguro</p>
+      </div>
+      <button onClick={login} disabled={loading} style={{display:"flex",alignItems:"center",gap:12,border:"1px solid #e5e7eb",borderRadius:14,padding:"14px 24px",fontSize:14,fontWeight:600,color:"#0d0d0d",background:"#fff",cursor:"pointer"}}>
+        <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.2l6.8-6.8C35.7 2.2 30.2 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.9 6.1C12.4 13 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v8.5h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4 6.9-10 6.9-17z"/><path fill="#FBBC05" d="M10.5 28.6A14.8 14.8 0 0 1 9.5 24c0-1.6.3-3.1.7-4.6l-7.9-6.1A23.9 23.9 0 0 0 0 24c0 3.9.9 7.5 2.6 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.2-5.5l-7.5-5.8c-2 1.4-4.6 2.2-7.7 2.2-6.2 0-11.5-4.2-13.4-9.8l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>
+        {loading?"Ingresando…":"Ingresar con Google"}
+      </button>
+      <p style={{fontSize:11,color:"#d1d5db",textAlign:"center",maxWidth:260}}>Solo vos podés ver y editar tus datos.</p>
+    </div>
+  );
+}
+
+// ─── App root ───────────────────────────────────────────────────────────────
+function App() {
+  const [user,setUser]=useState(undefined);
+  const [tab,setTab]=useState("cajas");
+  const [boxes,setBoxes]=useState([]);
+  const [objetos,setObjetos]=useState([]);
+  const [ultimo,setUltimo]=useState([]);
+  const [zones,setZones]=useState(DEFAULT_ZONES);
+  const [syncing,setSyncing]=useState(false);
+
+  useEffect(()=>{
+    const params=new URLSearchParams(window.location.search);
+    const cajaParam=params.get("caja");
+    if(cajaParam) window.__cajaParam=cajaParam;
+  },[]);
+
+  useEffect(()=>{
+    function init(){
+      const{auth,onAuthStateChanged,db,collection,onSnapshot}=window.__firebase;
+      onAuthStateChanged(auth,(u)=>{
+        setUser(u||null);
+        if(u){
+          // Cajas
+          onSnapshot(collection(db,"cajas"),(snap)=>{
+            const data=snap.docs.map(d=>({...d.data(),id:d.id}));
+            data.sort((a,b)=>(a.number||"").localeCompare(b.number||""));
+            setBoxes(data);
+          });
+          // Objetos — seed con los iniciales si está vacío
+          onSnapshot(collection(db,"objetos"),(snap)=>{
+            if(snap.empty){
+              INITIAL_OBJETOS.forEach(async o=>{
+                const{db,doc,setDoc}=window.__firebase;
+                await setDoc(doc(db,"objetos",o.id),o);
+              });
+            } else {
+              setObjetos(snap.docs.map(d=>({...d.data(),id:d.id})));
+            }
+          });
+          // Último momento
+          onSnapshot(collection(db,"ultimo"),(snap)=>{
+            setUltimo(snap.docs.map(d=>({...d.data(),id:d.id})));
+          });
+          // Zonas
+          onSnapshot(collection(db,"config"),(snap)=>{
+            const cfg=snap.docs.find(d=>d.id==="zones");
+            if(cfg) setZones(cfg.data().list||DEFAULT_ZONES);
+          });
+        }
+      });
+    }
+    if(window.__firebase) init();
+    else window.addEventListener("firebase-ready",init,{once:true});
+  },[]);
+
+  async function addZone(zone){
+    if(zones.includes(zone))return;
+    const newZones=[...zones,zone];
+    setZones(newZones);
+    const{db,doc,setDoc}=window.__firebase;
+    await setDoc(doc(db,"config","zones"),{list:newZones});
+  }
+
+  if(user===undefined) return <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",color:"#9ca3af",fontSize:13}}>Cargando…</div>;
+  if(user===null) return <LoginScreen/>;
+
+  const TABS=[
+    {id:"cajas",icon:"📦",label:"Cajas"},
+    {id:"objetos",icon:"🛋️",label:"Objetos"},
+    {id:"ultimo",icon:"⏰",label:"Último"},
+  ];
+
+  return (
+    <div style={{minHeight:"100vh",background:"#fff"}}>
+      {tab==="cajas"&&<TabCajas boxes={boxes} setBoxes={setBoxes} zones={zones} onAddZone={addZone} syncing={syncing} setSyncing={setSyncing}/>}
+      {tab==="objetos"&&<TabObjetos objetos={objetos} setObjetos={setObjetos} zones={zones} onAddZone={addZone} syncing={syncing} setSyncing={setSyncing}/>}
+      {tab==="ultimo"&&<TabUltimo items={ultimo} setItems={setUltimo} zones={zones} onAddZone={addZone} syncing={syncing} setSyncing={setSyncing}/>}
+
+      {/* Tab bar */}
+      <div className="tab-bar">
+        {TABS.map(t=>(
+          <button key={t.id} className="tab-btn" onClick={()=>setTab(t.id)}
+            style={{color:tab===t.id?"#0d0d0d":"#9ca3af"}}>
+            <span>{t.icon}</span>
+            <span style={{fontWeight:tab===t.id?700:400}}>{t.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 
 <script>
-  if ("serviceWorker" in navigator) {
-    window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js"));
+  if("serviceWorker" in navigator){
+    window.addEventListener("load",()=>navigator.serviceWorker.register("/MUDANZA/sw.js"));
   }
 </script>
 </body>
