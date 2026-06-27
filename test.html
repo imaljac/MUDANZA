@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Test</title>
+  <style>
+    body{font-family:sans-serif;padding:20px;background:#fff;}
+    .ok{color:green;font-weight:bold;}
+    .fail{color:red;font-weight:bold;}
+    pre{background:#f3f4f6;padding:12px;border-radius:8px;font-size:12px;overflow:auto;}
+    h2{margin:16px 0 8px;}
+  </style>
+</head>
+<body>
+<h1>Diagnóstico Mudanza</h1>
+<div id="out"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+
+<script>
+const out = document.getElementById('out');
+function log(msg, ok) {
+  const p = document.createElement('p');
+  p.innerHTML = '<span class="'+(ok?'ok':'fail')+'">'+(ok?'✓':'✗')+'</span> '+msg;
+  out.appendChild(p);
+}
+
+// 1. React
+try { log('React: '+React.version, true); } catch(e) { log('React FALLO: '+e, false); }
+
+// 2. Firebase
+try { log('Firebase: '+firebase.SDK_VERSION, true); } catch(e) { log('Firebase FALLO: '+e, false); }
+
+// 3. ReactDOM
+try {
+  const s = document.createElement('script');
+  s.src = 'https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js';
+  s.onload = () => {
+    log('ReactDOM cargado', true);
+    
+    // 4. Render test
+    try {
+      const div = document.createElement('div');
+      out.appendChild(div);
+      ReactDOM.createRoot(div).render(React.createElement('p', {style:{color:'blue'}}, '✓ React renderiza OK'));
+      log('React renderiza', true);
+    } catch(e) { log('React render FALLO: '+e, false); }
+
+    // 5. useState test
+    try {
+      const {useState} = React;
+      log('useState disponible: '+(typeof useState), true);
+    } catch(e) { log('useState FALLO: '+e, false); }
+
+    // 6. fetch test
+    fetch('https://imaljac.github.io/MUDANZA/index.html')
+      .then(r => {
+        log('index.html status: '+r.status, r.ok);
+        return r.text();
+      })
+      .then(text => {
+        log('index.html size: '+text.length+' chars', true);
+        log('Tiene tab-bar: '+(text.includes('tab-bar')?'SI':'NO'), text.includes('tab-bar'));
+        log('Tiene TabObjetos: '+(text.includes('TabObjetos')?'SI':'NO'), text.includes('TabObjetos'));
+        log('Tiene babel: '+(text.toLowerCase().includes('type="text/babel"')?'SI (MAL)':'NO (OK)'), !text.toLowerCase().includes('type="text/babel"'));
+        log('Tiene firebase-compat: '+(text.includes('firebase-app-compat')?'SI':'NO'), text.includes('firebase-app-compat'));
+      })
+      .catch(e => log('Fetch FALLO: '+e, false));
+
+  };
+  s.onerror = () => log('ReactDOM script FALLO', false);
+  document.head.appendChild(s);
+} catch(e) { log('ReactDOM FALLO: '+e, false); }
+
+// 7. User agent
+log('Browser: '+navigator.userAgent.slice(0,80), true);
+</script>
+</body>
+</html>
